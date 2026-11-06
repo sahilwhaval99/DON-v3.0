@@ -6,12 +6,13 @@ google-genai>=0.3.0
 # --- Config ---
 python-dotenv>=1.0
 
-# --- Web server / dashboard (added in Layer 2) ---
+# --- Web server / dashboard ---
 fastapi>=0.111
 uvicorn[standard]>=0.30
 jinja2>=3.1
 python-multipart>=0.0.9
 psutil>=5.9
 
-# --- PC control tools ---
-pyautogui>=0.9.54
+# --- PC control tools (optional — only needed on local desktop) ---
+# These fail on headless servers (like GitHub Codespaces).
+# Install separately on your desktop: pip install pyautogui pyperclip Pillow

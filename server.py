@@ -1,30 +1,29 @@
 """
 DON v3.0 web server — FastAPI + WebSockets.
 
-Serves the red/blue JARVIS dashboard and connects it to the SAME working
+Serves the JARVIS dashboard and connects it to the SAME working
 Assistant used by the CLI, so the brain, tools, and memory behave identically.
 
 Endpoints:
   GET  /                 -> dashboard page
   POST /api/chat         -> {text} -> {reply}
+  POST /api/chat_stream  -> streamed plain-text reply
   GET  /api/status       -> model / brain-ready / uptime
   GET  /api/reminders    -> pending reminders
   WS   /ws               -> live system stats (CPU/memory/uptime)
-
-The chat runs the assistant in a threadpool so a slow Gemini call never blocks
-the event loop. Robust connection handling means no "Failed to fetch".
 """
 from __future__ import annotations
 
 import asyncio
 import datetime as _dt
 import json
+import traceback
 
 import config
 
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-    from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
     from fastapi.concurrency import run_in_threadpool
@@ -71,21 +70,27 @@ async def index(request: Request):
 
 @app.post("/api/chat")
 async def api_chat(request: Request):
-    data = await request.json()
-    text = (data or {}).get("text", "")
-    # Run the (possibly slow) brain call off the event loop.
-    reply = await run_in_threadpool(assistant.handle, text)
-    return JSONResponse({"reply": reply})
+    """Non-streaming fallback: send text, get full reply."""
+    try:
+        data = await request.json()
+        text = (data or {}).get("text", "")
+        reply = await run_in_threadpool(assistant.handle, text)
+        return JSONResponse({"reply": reply})
+    except Exception as exc:
+        traceback.print_exc()
+        return JSONResponse({"reply": f"Server error: {exc}"}, status_code=200)
 
 
 @app.post("/api/chat_stream")
 async def api_chat_stream(request: Request):
-    """Stream the reply as plain-text chunks (Server-Sent-style)."""
-    from fastapi.responses import StreamingResponse
+    """Stream the reply as plain-text chunks."""
     import queue as _queue
-    import threading as _th
+    import threading
 
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
     text = (data or {}).get("text", "")
 
     q: _queue.Queue = _queue.Queue()
@@ -96,15 +101,19 @@ async def api_chat_stream(request: Request):
             for piece in assistant.handle_stream(text):
                 q.put(piece)
         except Exception as exc:
-            q.put(f"[error: {exc}]")
+            traceback.print_exc()
+            q.put(f"Apologies sir, I encountered an error: {exc}")
         finally:
             q.put(SENTINEL)
 
-    _th.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=worker, daemon=True).start()
 
     async def gen():
         while True:
-            piece = await asyncio.to_thread(q.get)
+            try:
+                piece = await asyncio.to_thread(q.get, timeout=60)
+            except Exception:
+                break
             if piece is SENTINEL:
                 break
             yield piece

@@ -48,11 +48,12 @@
     bubble.textContent = "…";
     let full = "";
     try {
+      // Try streaming first
       const res = await fetch("/api/chat_stream", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({text})
       });
-      if (!res.body) throw new Error("no stream");
+      if (!res.ok || !res.body) throw new Error("stream-fail");
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let first = true;
@@ -65,12 +66,26 @@
         bubble.textContent = full;
         convo.scrollTop = convo.scrollHeight;
       }
-      if (!full) bubble.textContent = "…";
+      if (!full) throw new Error("empty-stream");
       if (speakFn && full) speakFn(full);
       logActivity("You: " + text.slice(0, 40));
       refreshReminders();
-    } catch(e){
-      bubble.textContent = "Connection error: " + e.message + " (is the server still running?)";
+    } catch(streamErr){
+      // Fallback: use the non-streaming endpoint
+      try {
+        const res2 = await fetch("/api/chat", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({text})
+        });
+        const data = await res2.json();
+        full = data.reply || "…";
+        bubble.textContent = full;
+        if (speakFn && full) speakFn(full);
+        logActivity("You: " + text.slice(0, 40));
+        refreshReminders();
+      } catch(e2){
+        bubble.textContent = "Connection error: " + e2.message + " (is the server still running?)";
+      }
     } finally {
       sendBtn.disabled = false;
       input.focus();

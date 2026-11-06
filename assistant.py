@@ -6,6 +6,8 @@ Single entry point: Assistant.handle(text) -> str. Used by both the CLI test
 """
 from __future__ import annotations
 
+import traceback
+
 import config
 from brain import Brain
 from memory import Memory
@@ -39,6 +41,7 @@ class Assistant:
         "search", "google", "look up", "news", "latest", "weather", "temperature",
         "open ", "launch", "screenshot", "remind", "reminder", "price", "stock",
         "who won", "today", "current", "right now",
+        "clipboard", "mute", "volume", "play", "pause", "screen", "fetch",
     )
 
     def _needs_tool(self, text: str) -> bool:
@@ -78,13 +81,17 @@ class Assistant:
         text = (text or "").strip()
         if not text:
             return "I'm listening."
-        fast = self._fast_path(text)
-        if fast is not None:
-            self.memory.log_turn(text, fast)
-            return fast
-        reply = self.brain.chat(text)
-        self.memory.log_turn(text, reply)
-        return reply
+        try:
+            fast = self._fast_path(text)
+            if fast is not None:
+                self.memory.log_turn(text, fast)
+                return fast
+            reply = self.brain.chat(text)
+            self.memory.log_turn(text, reply)
+            return reply
+        except Exception as exc:
+            traceback.print_exc()
+            return f"Apologies sir, I hit a problem: {exc}"
 
     def handle_stream(self, text: str):
         """Yield the reply in chunks for fast, live output.
@@ -97,22 +104,26 @@ class Assistant:
         if not text:
             yield "I'm listening."
             return
-        # Instant, no-API commands first (open apps, time, date, screenshot).
-        fast = self._fast_path(text)
-        if fast is not None:
-            self.memory.log_turn(text, fast)
-            yield fast
-            return
-        if self._needs_tool(text):
-            reply = self.brain.chat(text)
-            self.memory.log_turn(text, reply)
-            yield reply
-            return
-        collected = []
-        for piece in self.brain.chat_stream(text):
-            collected.append(piece)
-            yield piece
-        self.memory.log_turn(text, "".join(collected))
+        try:
+            # Instant, no-API commands first (open apps, time, date, screenshot).
+            fast = self._fast_path(text)
+            if fast is not None:
+                self.memory.log_turn(text, fast)
+                yield fast
+                return
+            if self._needs_tool(text):
+                reply = self.brain.chat(text)
+                self.memory.log_turn(text, reply)
+                yield reply
+                return
+            collected = []
+            for piece in self.brain.chat_stream(text):
+                collected.append(piece)
+                yield piece
+            self.memory.log_turn(text, "".join(collected))
+        except Exception as exc:
+            traceback.print_exc()
+            yield f"Apologies sir, I hit a problem: {exc}"
 
 
 if __name__ == "__main__":
