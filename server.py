@@ -100,7 +100,7 @@ async def api_chat_stream(request: Request):
         finally:
             q.put(SENTINEL)
 
-    _th.start_new_thread(worker, ())
+    _th.Thread(target=worker, daemon=True).start()
 
     async def gen():
         while True:
