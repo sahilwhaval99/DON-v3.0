@@ -46,13 +46,7 @@ class Brain:
             self._client = None
 
     def _resolve_model(self, preferred: str) -> str:
-        """Return a usable model name in the exact format this SDK expects.
-
-        The .list() call returns names like 'models/gemini-2.5-flash'. Some SDK
-        versions want the full 'models/...' path. We find the preferred model
-        among the key's real models and return its exact name; if not found, we
-        fall back to the first flash model available.
-        """
+        """Return a usable model name that actually works for this API key."""
         try:
             usable = []
             for m in self._client.models.list():
@@ -61,24 +55,30 @@ class Brain:
                            or getattr(m, "supported_generation_methods", None) or [])
                 if actions and "generateContent" not in actions:
                     continue
-                usable.append(name)  # e.g. 'models/gemini-2.5-flash'
+                usable.append(name.split("/")[-1])  # store short name e.g. 'gemini-flash-lite-latest'
 
-            # Try to match the preferred name (with or without 'models/' prefix).
+            # 1. Exact match with preferred
             pref_short = preferred.split("/")[-1]
-            for full in usable:
-                if full.split("/")[-1] == pref_short:
-                    return full
+            if pref_short in usable:
+                return pref_short
 
-            # Fall back to the first plain 'flash' text model (avoid tts/image).
-            for full in usable:
-                short = full.split("/")[-1]
-                if "flash" in short and not any(x in short for x in
-                                                ("tts", "image", "audio", "vision", "preview")):
-                    return full
-            # Last resort: any flash, then any usable model.
-            for full in usable:
-                if "flash" in full.split("/")[-1]:
-                    return full
+            # 2. Modern working models priority list
+            priority_models = [
+                "gemini-flash-lite-latest",
+                "gemini-3.5-flash-lite",
+                "gemini-3.8-flash",
+                "gemini-flash-latest",
+                "gemini-pro-latest"
+            ]
+            for pm in priority_models:
+                if pm in usable:
+                    return pm
+
+            # 3. Any non-image, non-tts flash model
+            for u in usable:
+                if "flash" in u and not any(x in u for x in ("tts", "image", "audio", "vision", "preview")):
+                    return u
+
             if usable:
                 return usable[0]
         except Exception as exc:
